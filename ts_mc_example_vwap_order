@@ -1,0 +1,217 @@
+
+//-------------------------------------------------------------------------
+// This signal demonstrates the use of IBPlugin to trade an IBKR account
+// from within MultiCharts or TradeStation.
+// The signal just connects to TWS/Gateway (watch port,IP)
+// places a Vwap orders, waits 5 seconds and cancels this order
+//-------------------------------------------------------------------------
+// --- declare dll functions ---
+external: "ibplugina.DLL", int, "ibgTS_ON_CREATE", IEasyLanguageObject;
+
+external: "ibplugina.DLL", int, "ibgTS_ON_DESTROY", IEasyLanguageObject;
+
+
+DefineDLLFunc: "ibplugina.DLL",int, "ibgCONNECT",
+                  int,{connid}
+                  LPSTR,{ip}
+                  int,{port}
+                  int,{clientid}
+                  int,{nbr_channels}
+                  int;{timeout}
+                   
+DefineDLLFunc: "ibplugina.DLL",int, "ibgNAME_TO_UID",
+                  LPSTR;{symbol}
+
+
+DefineDLLFunc: "ibplugina.DLL",int64, "ibgORDER_SEND_STR",
+                  int,{connid}
+                  int,{uidc}
+                  int64,{uid}
+                  LPSTR,{order_attrib_list}
+                  int;{id_allocation}
+                  
+DefineDLLFunc: "ibplugina.DLL",int, "ibgORDER_DELETE",
+                  int,{connid}
+                  int64,{uid}
+                  int;{sync}
+                  
+DefineDLLFunc: "ibplugina.DLL",int64, "ibgORDER_CLOSE",
+                  int,{connid}
+                  int64,{uid}
+                  int;{sync}
+                  
+DefineDLLFunc: "ibplugina.DLL",LPSTR, "ibgORDER_ATTRIBUTE",
+                  int,{connid}
+                  int64,{uid}
+                  int;{idattrib}
+
+DefineDLLFunc: "ibplugina.DLL",int, "ibgCREATE_PENDING_ORDER_SNAPSHOT",
+                  int,{connid}
+                  int,{conid}
+                  int;{istrict}
+
+DefineDLLFunc: "ibplugina.DLL",double, "ibgORDER_INFO_DBL",
+                  int,{idx}
+                  int;{tag}
+
+DefineDLLFunc: "ibplugina.DLL",int, "ibgORDER_INFO_INT",
+                  int,{idx}
+                  int;{tag}
+
+DefineDLLFunc: "ibplugina.DLL",int64, "ibgORDER_INFO_INT64",
+                  int,{idx}
+                  int;{tag}
+
+DefineDLLFunc: "ibplugina.DLL",LPSTR, "ibgORDER_INFO_STR",
+                  int,{idx}
+                  int;{tag}
+                  
+DefineDLLFunc: "ibplugina.DLL",int, "ibgORDER_STATUS",
+                  int64;{uid}
+
+DefineDLLFunc: "ibplugina.DLL",int, "ibgWAIT_SUBMITTED",
+                  int64,{uid}
+                  int;{timeout}
+                  
+DefineDLLFunc: "ibplugina.DLL",int, "ibgWAIT_FILLED",
+                  int64,{uid}
+                  int;{timeout}
+                  
+DefineDLLFunc: "ibplugina.DLL",int, "ibgPOSITION_CLOSE",
+                  int,{connid}
+                  int,{uidc}
+                  LPSTR,{account_list}
+                  int;{sync}
+                  
+DefineDLLFunc: "ibplugina.DLL",double, "ibgACCOUNT_INFO",
+                  int,{connid}
+                  int,{idinfo}
+                  LPSTR;{account_list}
+                  
+DefineDLLFunc: "ibplugina.DLL",LPSTR, "ibgACCOUNT_INFO_STR",
+                  int,{connid}
+                  int,{idinfo}
+                  LPSTR;{account_list}
+                                    
+DefineDLLFunc: "ibplugina.DLL",int, "ibgCREATE_POSITION_SNAPSHOT",
+                  int;{connid}
+
+DefineDLLFunc: "ibplugina.DLL",double, "ibgPOSITION_INFO_DBL",
+                  int,{idx}
+                  int;{tag}
+
+DefineDLLFunc: "ibplugina.DLL",int, "ibgPOSITION_INFO_INT",
+                  int,{idx}
+                  int;{tag}
+
+DefineDLLFunc: "ibplugina.DLL",int64, "ibgPOSITION_INFO_INT64",
+                  int,{idx}
+                  int;{tag}
+
+DefineDLLFunc: "ibplugina.DLL",LPSTR, "ibgPOSITION_INFO_STR",
+                  int,{idx}
+                  int;{tag}
+
+DefineDLLFunc: "ibplugina.DLL",int, "ibgCONNECTION_STATUS",
+                  int;{connid}                                    
+                  
+DefineDLLFunc: "ibplugina.DLL",int, "ibgCREATE_ALLOCATION",
+                  int,{connid}
+                  LPSTR,{alloc_type}
+                  LPSTR,{alloc_name}
+                  LPSTR,{alloc_method}
+                  LPSTR;{percentage}
+
+DefineDLLFunc: "ibplugina.DLL",int, "ibgSLEEP",
+                  int;{milliseconds}
+                  
+Variables:
+	 conid_intel(270639),     	{IBKR unique id for intel}
+	 api_port(7496),     		{API api_port of TWS or Gateway. Make sure API is on. Active X enabled, api_port same as here..}
+	 connection_id(1),     		{ID of connection}
+	 order_attribute_str(""),	{list of attrib=value pairs as order attributes}
+	 algo_param_str(""),		{list of attrib=value pairs as algo param (Vwap is algo order)}
+	 uid_order(0),			{unique id of order}
+       alloc_id(0),                   {Allocation id for orders}
+	 int_ret(0),				{int return value}
+	 Initialized(0);			{init flag flag}
+
+{ DLL initialisation}
+
+	{init the DLL }
+if Initialized = 0  then begin
+
+	//int_ret=ibgINIT_SCRIPT_A("multicharts","ibplugin_demo",3);
+	Print("init=",int_ret);
+	
+	// connect to TWS / Gateway at standard api_port. make sure TWS or Gateway are setup to operate with API clients such as ibplugin 
+	// 	(http://www.youtube.com/watch?v=53tmypRq5wI)
+	ibgCONNECT(connection_id,"",api_port,1345,1,3000);
+	
+	// create an id for standard allocation: group|All. This is passed to orders
+	// (disable command for single accounts)
+	alloc_id=ibgCREATE_ALLOCATION(connection_id, "group","All","", "");
+	// algo param pair sep char "|"	
+	// algo param value assign char "~"
+	// So an algo argument is defined by a string concatenation of id1~value1|id2~value2|id3~value3... and so on;how many attributes your algo requires
+
+	// create the Vwap algo param string. The challenge: User need to figure out what parameters required for his algo order (https://interactivebrokers.github.io/tws-api/algos.html)
+	algo_param_str="noTakeLiq~1"; // human say: noTakeLiq=1 (the ~ is used as assginment charactar within algo param definition)
+	algo_param_str+="|speedUp~1";
+	algo_param_str+="|allowPastEndTime~1";
+
+	Print(	algo_param_str);	
+	// order attrib pair sep char "#"
+	// order attrib value assign char "="
+	// So an order is defined by a string concatenation of id1=value1#id2=value2#id3=value3... and so on;how many attributes your order requires
+	
+	// create order attributes. The <algo_param_str> is such an attribute
+	// the algo name (the 69 is the order attribute id. 	
+	order_attribute_str = "69=Vwap"; // algo name	
+	// attribute separator and algo param id
+	order_attribute_str += "#70=";
+	order_attribute_str += algo_param_str;
+
+	// action attribute	
+	order_attribute_str += "#53=BUY";
+
+	// type attribute	
+	order_attribute_str += "#6=LMT";
+
+	// exchange attribute	
+	order_attribute_str += "#1007=SMART";
+
+	// limit price attribute
+	order_attribute_str += "#2=44.84";
+
+	// outside RTH atribute (only false)
+	order_attribute_str += "#14=0";
+
+	// time in force attribute (only day accepted)
+	order_attribute_str += "#5=DAY";
+
+	// ordersize
+	order_attribute_str += "#1=100";
+	
+	Print("connection status",ibgCONNECTION_STATUS(connection_id));
+	
+	Print(	order_attribute_str);
+	{ Finally place order }
+	uid_order=ibgORDER_SEND_STR(connection_id,conid_intel, 0,	 order_attribute_str,alloc_id);
+	Print("uid=",	uid_order);
+
+	// wait 5 seconds
+	ibgSLEEP(5000);
+	
+	// cancel (delete) order async
+	int_ret=ibgORDER_DELETE(connection_id,uid_order,0);
+	Print("cancel ret=",	int_ret);
+	
+	Initialized=1;
+	//ibgDEINIT_SCRIPT();
+end;
+
+#Events
+	OnCreate = 	ibgTS_ON_CREATE;
+	OnDestroy = ibgTS_ON_DESTROY;
+#end
