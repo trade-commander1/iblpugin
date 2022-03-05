@@ -1,0 +1,313 @@
+
+//-------------------------------------------------------------------------
+// This signal demonstrates the use of IBPlugin to trade an IBKR account
+// from within MultiCharts or TradeStation.
+// The signal just connects to TWS/Gateway (watch port,IP)
+// places a Vwap orders, waits 5 seconds and cancels this order
+//-------------------------------------------------------------------------
+// --- declare dll functions ---
+external: "ibplugina.DLL", int, "ibgTS_ON_CREATE", IEasyLanguageObject;
+
+external: "ibplugina.DLL", int, "ibgTS_ON_DESTROY", IEasyLanguageObject;
+
+
+DefineDLLFunc: "ibplugina.DLL",int, "ibgCONNECT",
+                  int,{connid}
+                  LPSTR,{ip}
+                  int,{port}
+                  int,{clientid}
+                  int,{nbr_channels}
+                  int;{timeout}
+                   
+DefineDLLFunc: "ibplugina.DLL",int, "ibgNAME_TO_UID",
+                  LPSTR;{symbol}
+
+
+DefineDLLFunc: "ibplugina.DLL",int64, "ibgORDER_SEND_STR",
+                  int,{connid}
+                  int,{uidc}
+                  int64,{uid}
+                  LPSTR,{order_attrib_list}
+                  int;{id_allocation}
+                  
+DefineDLLFunc: "ibplugina.DLL",int, "ibgORDER_DELETE",
+                  int,{connid}
+                  int64,{uid}
+                  int;{sync}
+                  
+DefineDLLFunc: "ibplugina.DLL",int64, "ibgORDER_CLOSE",
+                  int,{connid}
+                  int64,{uid}
+                  int;{sync}
+                  
+DefineDLLFunc: "ibplugina.DLL",LPSTR, "ibgORDER_ATTRIBUTE",
+                  int,{connid}
+                  int64,{uid}
+                  int;{idattrib}
+
+DefineDLLFunc: "ibplugina.DLL",int, "ibgCREATE_PENDING_ORDER_SNAPSHOT",
+                  int,{connid}
+                  int,{conid}
+                  int;{istrict}
+
+DefineDLLFunc: "ibplugina.DLL",double, "ibgORDER_INFO_DBL",
+                  int,{idx}
+                  int;{tag}
+
+DefineDLLFunc: "ibplugina.DLL",int, "ibgORDER_INFO_INT",
+                  int,{idx}
+                  int;{tag}
+
+DefineDLLFunc: "ibplugina.DLL",int64, "ibgORDER_INFO_INT64",
+                  int,{idx}
+                  int;{tag}
+
+DefineDLLFunc: "ibplugina.DLL",LPSTR, "ibgORDER_INFO_STR",
+                  int,{idx}
+                  int;{tag}
+                  
+DefineDLLFunc: "ibplugina.DLL",int, "ibgORDER_STATUS",
+                  int64;{uid}
+
+DefineDLLFunc: "ibplugina.DLL",int, "ibgWAIT_SUBMITTED",
+                  int64,{uid}
+                  int;{timeout}
+                  
+DefineDLLFunc: "ibplugina.DLL",int, "ibgWAIT_FILLED",
+                  int64,{uid}
+                  int;{timeout}
+                  
+DefineDLLFunc: "ibplugina.DLL",int, "ibgPOSITION_CLOSE",
+                  int,{connid}
+                  int,{uidc}
+                  LPSTR,{account_list}
+                  int;{sync}
+                  
+DefineDLLFunc: "ibplugina.DLL",double, "ibgACCOUNT_INFO",
+                  int,{connid}
+                  int,{idinfo}
+                  LPSTR;{account_list}
+                  
+DefineDLLFunc: "ibplugina.DLL",LPSTR, "ibgACCOUNT_INFO_STR",
+                  int,{connid}
+                  int,{idinfo}
+                  LPSTR;{account_list}
+                                    
+DefineDLLFunc: "ibplugina.DLL",int, "ibgCREATE_POSITION_SNAPSHOT",
+                  int;{connid}
+
+DefineDLLFunc: "ibplugina.DLL",double, "ibgPOSITION_INFO_DBL",
+                  int,{idx}
+                  int;{tag}
+
+DefineDLLFunc: "ibplugina.DLL",int, "ibgPOSITION_INFO_INT",
+                  int,{idx}
+                  int;{tag}
+
+DefineDLLFunc: "ibplugina.DLL",int64, "ibgPOSITION_INFO_INT64",
+                  int,{idx}
+                  int;{tag}
+
+DefineDLLFunc: "ibplugina.DLL",LPSTR, "ibgPOSITION_INFO_STR",
+                  int,{idx}
+                  int;{tag}
+                                    
+Variables:
+int 	 conid(12087792),     		{IBKR unique id for EUR.USD}
+int	 port(7496),     			{API port of TWS or Gateway. Make sure API is on. Active X enabled, port same as here..}
+int	 connection_id(1),     		{ID of connection}
+string	 order_attribute_str(""),	{list of attrib=value pairs as order attributes}
+string	 strategy_name("my_strat1"),		{Name of this strategy}
+int	 total_objects(0),			{Total number of non ZERO positions or pending orders at snapshot time}
+double	 uid_order(0),			{unique id of order. We need double here as it has 8 bytes. MC/TC has no 64 bit integer which is the native type of uid}
+int	 uid_parent_order(0),		{unique id of parent order}
+string	 fingerprint(""),			{fingerprint of position or order}	 
+int	  order_status(0),		      {status of order in focus: PendingSubmit=5, PreSubmitted=7,Submitted=8,Filled=9,Cancelled=10,FilledPartially=11}	 
+string	  order_type(""),		      {type of order in focus: MKT,LMT,STP}	
+double  lmt_price(0.0),			{ limit price for an order we like to place}
+
+int	 ret_int(0),				{buffer for int return values}	 
+double  ret_double(0.0),			{buffer for double returnvalues}
+string	 ret_str(""),			{buffer for string return values}
+
+int		 idx(0),				{Loop index} 
+int		 Initialized(0);			{init flag flag}
+
+{ DLL initialisation}
+
+	{init the DLL }
+if Initialized = 0  then begin
+	
+	once clearprintlog;	 
+	
+	// Strategy name is taken as comment tag in order reference (to have a hint where this order comes from)
+	Print("IBPlugin TradeStation MultiCharts Example");
+	
+	// if you mapped the symbol of this chart to an IBKR contract using the IBPlugin admin tool, you could call 
+	// the mapping function in order to obtain IBKR contract id.
+	conid=ibgNAME_TO_UID("EURUSD");
+	Print("conid=",conid);
+
+
+	// --------------------------------------------	
+	// connect to TWS / Gateway at standard port. make sure TWS or Gateway are setup to operate with API clients such as ibplugin.
+	// Video API client setup:  http://www.youtube.com/watch?v=53tmypRq5wI
+	// The client id is set to auto.It is created by hash value of configuration. 
+	// The conifguration name for TS and MC is always: TSTN_MUCT
+	// NOTE: call this function only ONCE. The IBPlugin will keep connection to TWS, even, when TWS restarts.	
+	ret_int=ibgCONNECT(connection_id,"",port,-1,1,20000);
+	// conn state = 1: connected to TWS; =2: plugin connected to TWS and TWS connected to IBServer;3=all initial requests done
+	Print("connection status=",	ret_int);
+
+
+	// --------------------------------------------	
+	// Print out some important account information	
+	Print("+++ Account Data");
+	// Get Equity with Loan Value for all accounts managed by API connection
+	ret_double=ibgACCOUNT_INFO(connection_id,1,"");
+	Print("EWL=",ret_double);
+	// Get Margin
+	ret_double=ibgACCOUNT_INFO(connection_id,2,"");
+	Print("Margin=",ret_double);
+	// Get Number of managed accounts
+	ret_double=ibgACCOUNT_INFO(connection_id,6,"");
+	Print("# managed accounts=",ret_double);
+	// Get Is demo account flag (> 0: connected IB account is demo/paper)
+	ret_double=ibgACCOUNT_INFO(connection_id,7,"");
+	Print("is demo=",ret_double);
+	// Get list of managed accounts
+	ret_str=ibgACCOUNT_INFO_STR(connection_id,101,"");
+	Print("account list=",ret_str);	
+	Print("--- Account Data");
+
+	// --------------------------------------------
+	// List all non zero positions:
+	Print("+++ positions START");
+	// create a snapshot of currently non zero positions (resolution down to (sub-) account)
+	total_objects=ibgCREATE_POSITION_SNAPSHOT(connection_id);
+	Print("#positions=",total_objects );
+	// list all positions by index
+	For idx = 0 to total_objects-1 begin
+		// print out a string fingerprint of positions 
+		// (12 is id of position fingerprint;4 id of signed position;5 id of avg. entry price)		
+		fingerprint=ibgPOSITION_INFO_STR(idx,12);
+		Print(fingerprint);
+		// to get double values returned use function <ibgPOSITION_INFO_DBL>
+	end;
+	Print("--- positions END");
+
+	
+	// --------------------------------------------
+	// List all pending orders placed by THIS client (not placed in TWS or other API clients)
+	// pending orders of all contracts (2nd param=0) and realy pending only (3td param=1)
+	total_objects=ibgCREATE_PENDING_ORDER_SNAPSHOT(connection_id,0,1);		
+	Print("+++ list pending orders START. #=",total_objects);
+
+	// list all positions by index
+	For idx = 0 to total_objects-1
+	begin
+
+		// print out a string fingerprint of order (1020 is id of order fingerprint)		
+		fingerprint=ibgORDER_INFO_STR(idx,1020);
+		Print(fingerprint);
+		// to get double values returned, use function <ibgPOSITION_INFO_DBL>
+		// to get int64 values (order uids) returned, use function <ibgPOSITION_INFO_INT64>
+		// to get int values returned, use function <ibgPOSITION_INFO_INT>
+		// -----------------------------
+		// cancel current order[idx]
+		// get its uid
+		uid_order=ibgORDER_INFO_INT64(idx,1011);
+		if uid_order > 0 then
+			ret_int=ibgORDER_DELETE(connection_id,uid_order,0);		
+	end;
+	
+	Print("--- list pending orders END");
+	
+	// -------------------------------------------------------------------
+	// Place 5 limit orders (which are cancelled on next run (see above)
+	Print("+++ place some pending orders");
+	For idx = 1 to 5 begin
+		// create attribute string: size=50000
+		order_attribute_str="#1=50000#53=BUY#6=LMT#2=";
+		// modify price
+		lmt_price=1.02 + (idx * 0.001);
+		// append price to attribute string				
+		order_attribute_str += NumToStr(lmt_price,8);
+		// wwrite strategy name into comment of order
+		order_attribute_str += "#49";
+		order_attribute_str += strategy_name;
+
+		
+		// place order
+		uid_order=ibgORDER_SEND_STR(connection_id,conid,0,	order_attribute_str,0);
+		
+		// wait at most 1 second that order has been arrived at exchange (submitted status).
+		// (this works only, when connected at this time.)
+		if uid_order > 0 then
+		begin
+			ret_int=ibgWAIT_SUBMITTED(uid_order,1000);
+			Print("order uid=",uid_order ," submitted=",ret_int); // 1 means is submitted
+		end;
+		
+	end;	
+	Print("--- place some pending orders end");
+
+
+	// place MKT SELL Order	
+	Print("--- place MKT order");
+	order_attribute_str="#1=150000#53=SELL#6=MKT#49=";
+	// wwrite strategy name into comment of order
+	order_attribute_str += strategy_name;
+
+	
+	uid_order=ibgORDER_SEND_STR(connection_id,conid,0,	order_attribute_str,0);
+	Print("uid MKT=",	uid_order);
+	if uid_order > 0 then
+	begin
+		// wait order for been filled
+		// out: 1=order filled
+		//      0=timeout
+		//     -1=Order can't be filled (e.g. invalid for what reason ever)
+		ret_int=ibgWAIT_FILLED(uid_order,5000);		
+	end;
+	
+
+	// place another MKT SELL Order	to demonstrate ibgORDER_CLOSE
+	Print("--- place another MKT order and close it after fill");
+	order_attribute_str="#1=50000#53=SELL#6=MKT#49=";
+	// wwrite strategy name into comment of order
+	order_attribute_str += strategy_name;	
+	uid_order=ibgORDER_SEND_STR(connection_id,conid,0,	order_attribute_str,0);
+	Print("uid MKT=",	uid_order);
+	if uid_order > 0 then
+	begin
+		// wait order for been filled
+		// out: 1=order filled
+		//      0=timeout
+		//     -1=Order can't be filled (e.g. invalid for what reason ever)
+		ret_int=ibgWAIT_FILLED(uid_order,5000);		
+		
+		if ret_int = 1 then
+		begin
+			// close position only raised by this order (so place opposite order)
+			ret_int=ibgORDER_CLOSE(connection_id,uid_order,5000);
+		end;
+	end;
+
+	// close all positions for contract
+	// wait for position closed
+	Print("--- close positions for symbol");
+	ret_int=ibgPOSITION_CLOSE(connection_id,conid,"",5000);
+
+	Print("init finished");
+	Initialized=1;
+end;
+
+#Events
+	// create a configuration of name TSTN_MUCT
+	// The configuration files - so also the symbol mapping database: contract.db
+	// can be found in folder:
+	// c:\trade-commander.com\ibplugin\configurations\TSTN_MUCT
+	OnCreate = 	ibgTS_ON_CREATE;
+	OnDestroy = ibgTS_ON_DESTROY;
+#end
